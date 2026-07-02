@@ -129,37 +129,99 @@ void draw() {
 // =============================================
 void battleScene() {
   camera();
-  background(240);
+  background(120, 200, 255);
 
-  fill(0);
-  textSize(18);
-  text("HP : " + player.hp, 70, 25);
-  text("MP : " + player.mp, 70, 50);
-  text("敵HP : " + enemy.hp, 570, 25);
-  text(playerTurn ? "プレイヤーターン" : "敵ターン", width/2, 25);
+  // 草
+  fill(70, 170, 70);
+  rect(0, height-120, width, 120);
 
-  drawMonster();
-
-  // ボタン
-  fill(30);
-  rect(30,  380, 130, 50);
-  rect(180, 380, 130, 50);
+  // タイトル
   fill(255);
+  textSize(28);
+  text("BATTLE", width/2, 30);
+
+  //--------------------------
+  // プレイヤー情報ウィンドウ
+  //--------------------------
+  fill(255,240);
+  stroke(0);
+  strokeWeight(3);
+  rect(20,20,220,110,15);
+
+  fill(0);
+  textAlign(LEFT,CENTER);
   textSize(18);
-  text("たたかう", 95,  405);
-  text("どうぐ",   245, 405);
+  text("PLAYER",35,40);
+
+  // HPバー
+  fill(180);
+  rect(80,60,120,15);
+
+  fill(0,220,0);
+  rect(80,60,map(player.hp,0,100,0,120),15);
 
   fill(0);
-  textSize(16);
-  text(message, width/2, 455);
-}
+  text("HP",35,67);
+  text(player.hp+"/100",205,67);
 
-void drawMonster() {
-  fill(255, 0, 0);
-  ellipse(width/2, 200, 100, 100);
+  // MPバー
+  fill(180);
+  rect(80,90,120,15);
+
+  fill(30,120,255);
+  rect(80,90,map(player.mp,0,50,0,120),15);
+
   fill(0);
-  textSize(20);
-  text("敵", width/2, 200);
+  text("MP",35,97);
+  text(player.mp+"/50",205,97);
+
+  //--------------------------
+  // 敵情報
+  //--------------------------
+  fill(255,240);
+  rect(width-240,20,220,80,15);
+
+  fill(0);
+  text("SLIME",width-210,40);
+
+  fill(180);
+  rect(width-180,60,120,15);
+
+  fill(255,60,60);
+  rect(width-180,60,map(enemy.hp,0,120,0,120),15);
+
+  fill(0);
+  text(enemy.hp+"/120",width-55,67);
+
+  //--------------------------
+  // 敵描画
+  //--------------------------
+  drawSlime(width/2,220);
+
+  //--------------------------
+  // メッセージ
+  //--------------------------
+  fill(255,250);
+  rect(20,330,width-40,70,15);
+
+  fill(0);
+  textAlign(LEFT,CENTER);
+  textSize(18);
+
+  if(playerTurn)
+    text("あなたのターン",40,350);
+  else
+    text("敵のターン",40,350);
+
+  text(message,40,380);
+
+  //--------------------------
+  // ボタン
+  //--------------------------
+  drawButton(60,415,170,45,"たたかう");
+  drawButton(410,415,170,45,"どうぐ");
+
+  textAlign(CENTER,CENTER);
 }
 
 // =============================================
@@ -237,18 +299,34 @@ void usePowerItem() {
 // 入力処理
 // =============================================
 void mousePressed() {
-  if (scene == 0 && playerTurn) {
-    // 「たたかう」ボタン → 魔法陣へ
-    if (mouseX > 30  && mouseX < 160 && mouseY > 380 && mouseY < 430) scene = 1;
-    // 「どうぐ」ボタン  → AR道具へ
-    if (mouseX > 180 && mouseX < 310 && mouseY > 380 && mouseY < 430) scene = 2;
-  } else if (scene == 1) {
-    magicMousePressed();    // KONOdemo_v1.pde
-  } else if (scene == 6) {
-    flickMousePressed();    // RX_magical_fight.pde
-  }
-}
 
+  if (scene == 0 && playerTurn) {
+
+    if (mouseX > 60 &&
+        mouseX < 230 &&
+        mouseY > 415 &&
+        mouseY < 460) {
+
+      scene = 1;
+    }
+
+    if (mouseX > 410 &&
+        mouseX < 580 &&
+        mouseY > 415 &&
+        mouseY < 460) {
+
+      scene = 2;
+    }
+
+  }
+  else if(scene==1){
+    magicMousePressed();
+  }
+  else if(scene==6){
+    flickMousePressed();
+  }
+
+}
 void keyPressed() {
   // ESCキーでアプリが終了しないようにする
   if (keyCode == ESC) {
@@ -274,6 +352,65 @@ class Player {
     this.mp     = mp;
     this.attack = attack;
   }
+}
+
+void drawSlime(float x, float y){
+
+  pushMatrix();
+  translate(x,y);
+
+  noStroke();
+
+  // 影
+  fill(0,70);
+  ellipse(0,55,90,18);
+
+  // スライム
+  fill(70,170,255);
+
+  beginShape();
+  vertex(0,-70);
+
+  bezierVertex(-55,-35,-60,20,-40,50);
+  bezierVertex(-15,80,15,80,40,50);
+  bezierVertex(60,20,55,-35,0,-70);
+
+  endShape(CLOSE);
+
+  // 光沢
+  fill(255,180);
+  ellipse(-18,-28,18,18);
+
+  // 目
+  fill(255);
+  ellipse(-15,-5,18,22);
+  ellipse(15,-5,18,22);
+
+  fill(0);
+  ellipse(-15,0,6,10);
+  ellipse(15,0,6,10);
+
+  // 口
+  noFill();
+  stroke(0);
+  strokeWeight(3);
+  arc(0,25,35,15,0,PI);
+
+  popMatrix();
+}
+
+void drawButton(float x,float y,float w,float h,String s){
+
+  fill(40,70,180);
+  stroke(255);
+  strokeWeight(3);
+
+  rect(x,y,w,h,12);
+
+  fill(255);
+  textAlign(CENTER,CENTER);
+  textSize(22);
+  text(s,x+w/2,y+h/2);
 }
 
 class Enemy {
