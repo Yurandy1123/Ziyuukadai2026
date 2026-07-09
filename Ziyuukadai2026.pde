@@ -77,23 +77,6 @@ void setup() {
     println("カメラが見つかりません");
   }
 
-  // ---- AR初期化（Tool.pde用）----
-  // camera_para.dat と *.obj が data/ フォルダに必要です
-  try {
-    nya = new MultiMarker(this, width, height,
-                          "camera_para.dat",
-                          NyAR4PsgConfig.CONFIG_PSG);
-    nya.addNyIdMarker(0, 40);
-    nya.addNyIdMarker(1, 40);
-    nya.addNyIdMarker(2, 40);
-    itemModel[0] = loadShape("herb.obj");
-    itemModel[1] = loadShape("bomb.obj");
-    itemModel[2] = loadShape("seed.obj");
-  } catch (Exception e) {
-    println("AR初期化エラー: " + e.getMessage());
-    println("camera_para.dat / *.obj を data/ フォルダに入れてください");
-  }
-
   // ---- 魔法陣の初期化（KONOdemo_v1.pde の関数）----
   initMagic();
 }
@@ -295,6 +278,12 @@ void usePowerItem() {
   itemFinished = true;
 }
 
+void useBombItem() {
+  enemy.hp = max(enemy.hp - 20, 0);
+  message = "Bomb！ 敵に20ダメージ！";
+  itemFinished = true;
+}
+
 // =============================================
 // 入力処理
 // =============================================
@@ -339,6 +328,9 @@ void keyPressed() {
 
   if (scene == 1) {
     magicKeyPressed();   // KONOdemo_v1.pde
+  }
+  if (scene == 2) {
+    itemKeyPressed();    // Tool.pde
   }
 }
 
