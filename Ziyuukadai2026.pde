@@ -70,7 +70,7 @@ void setup() {
   String[] cameras = Capture.list();
   if (cameras != null && cameras.length > 0) {
     // 複数カメラがある場合は cameras[0] を変更してください
-    video  = new Capture(this, cameras[0]);
+    video = new Capture(this, 640, 480, 30);
     video.start();
     opencv = new OpenCV(this, 640, 480);
   } else {
