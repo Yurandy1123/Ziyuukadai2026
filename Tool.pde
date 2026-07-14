@@ -16,38 +16,76 @@
 // ============================================================
 // ============================================================
 // Tool.pde
-// 色シールによる道具選択
+// 
+//カメラ画像から肌色領域を探し、グーチョキパーを判定
 //
 // ID対応
-// -1 : なし
-//  0 : パー   / 緑が多い      / Herb 回復
-//  1 : グー   / 赤も緑も少ない / Bomb
-//  2 : チョキ / 赤が見える    / Power Seed 攻撃力アップ
+// -1 : 手を認識していない
+//  0 : パー   / Herb 回復
+//  1 : グー  / Bomb
+//  2 : チョキ / Power Seed 攻撃力アップ
 // ============================================================
 
+// ENTERを押して確定したアイテム
 int selectedItemId = -1;
+
+// 現在の手の形に対応する3Dモデル
+int previewItemId = -1;
+
 boolean itemUsed = false;
 
 int itemEffectFrame = 0;
 int effectWait = 60;
+
+boolean waitingNextScene = false;
+int effectStartFrame = 0;
 
 // 判定を安定させるための変数
 int lastHandId = -1;
 int stableCount = 0;
 int stableHandId = -1;
 
-// 色の数をUIに出すため
-int debugRedCount = 0;
-int debugGreenCount = 0;
+// デバッグ表示用
+float debugHandArea = 0;
+float debugFillRatio = 0;
+float debugAspectRatio = 0;
+int debugPointCount = 0;
 
+// 認識範囲
+int handRoiX = 160;
+int handRoiY = 40;
+int handRoiW = 320;
+int handRoiH = 320;
+
+// 0：確認画面
+// 1：カメラ判定画面
+int itemToolState = 0;
+
+PImage debugSkinMask;
+
+float debugWhiteRatio = 0;
+int debugWhitePixels = 0;
+int debugRoiPixels = 0;
 
 // ============================================================
 // メインプログラムの scene == 2 から呼ばれる
 // ============================================================
+//緑の枠内のみを認識対象に
 void itemARScene() {
   camera();
   hint(DISABLE_DEPTH_TEST);
 
+  // ===============================
+  // 0 : 最初の確認画面
+  // ===============================
+  if (itemToolState == 0) {
+    drawItemStartScene();
+    return;
+  }
+
+  // ===============================
+  // 1 : カメラでハンドサイン判定
+  // ===============================
   background(0);
 
   // カメラ映像表示
@@ -62,109 +100,257 @@ void itemARScene() {
     return;
   }
 
-  // まだアイテムを使っていない時だけ判定
+  // 手を置く認識範囲
+  noFill();
+  stroke(0, 255, 100);
+  strokeWeight(3);
+  rect(handRoiX, handRoiY, handRoiW, handRoiH);
+
+  fill(0, 180);
+  noStroke();
+  rect(handRoiX, handRoiY - 30, handRoiW, 26);
+
+  fill(255);
+  textAlign(CENTER, CENTER);
+  textSize(15);
+  text(
+    "この枠の中に手を入れてください",
+    handRoiX + handRoiW / 2,
+    handRoiY - 17
+  );
+
   if (!itemUsed) {
-    selectedItemId = detectHandSignByColor();
+    // 現在の手の形を判定
+    previewItemId = detectHandSignByContour();
   }
 
-  // 3Dモデル表示
-  if (selectedItemId != -1) {
-    drawSelectedItemModel(selectedItemId);
+  if (previewItemId != -1) {
+    // 現在の判定結果に対応する3Dモデルを表示
+    drawSelectedItemModel(previewItemId);
   }
+  
+  // 効果表示後に自動で次画面へ
+  if (waitingNextScene) {
+    int elapsed = frameCount - effectStartFrame;
+    
+    // 約2秒
+    if (elapsed > 120) {
 
-  // アイテム使用後、少し待って戦闘画面へ戻す
-  if (itemUsed) {
-    if (frameCount - itemEffectFrame > effectWait) {
+      waitingNextScene = false;
+
       resetItemTool();
-      scene = 0;
+
+      // 次のシーンへ
+      scene = 3;
+
+      return;
     }
   }
 
   drawItemUI();
 }
 
+void drawItemStartScene() {
+  background(20, 25, 35);
+
+  fill(255);
+  textAlign(CENTER, CENTER);
+
+  textSize(36);
+  text("どうぐを使いますか？", width / 2, height / 2 - 90);
+
+  textSize(22);
+  text("ENTER : カメラを起動して道具を選ぶ", width / 2, height / 2 - 20);
+  text("R : 戦闘画面にもどる", width / 2, height / 2 + 25);
+
+  textSize(16);
+  text("グーチョキパーをカメラに見せて道具を選択", width / 2, height / 2 + 90);
+}
+
 
 // ============================================================
-// 色シールでハンドサイン判定
+// 白ピクセル割合でグーチョキパーを判定
 // ============================================================
-int detectHandSignByColor() {
+int detectHandSignByContour() {
   if (video == null) {
-    return -1;
+    clearHandDetection();
+    return stabilizeHandId(-1);
   }
 
   video.loadPixels();
 
-  int redCount = 0;
-  int greenCount = 0;
+  if (video.pixels == null || video.pixels.length == 0) {
+    clearHandDetection();
+    return stabilizeHandId(-1);
+  }
 
-  // 画面中央だけを見る
-  // 背景の色を拾いにくくするため
-  int startX = video.width / 4;
-  int endX   = video.width * 3 / 4;
-  int startY = video.height / 4;
-  int endY   = video.height * 3 / 4;
+  // ----------------------------------------------------------
+  // Processing画面のROI座標をカメラ画像の座標へ変換
+  // ----------------------------------------------------------
+  int videoRoiX = int(handRoiX * video.width / (float)width);
+  int videoRoiY = int(handRoiY * video.height / (float)height);
+  int videoRoiW = int(handRoiW * video.width / (float)width);
+  int videoRoiH = int(handRoiH * video.height / (float)height);
 
-  for (int y = startY; y < endY; y += 4) {
-    for (int x = startX; x < endX; x += 4) {
+  // カメラ画像の範囲からはみ出さないようにする
+  videoRoiX = constrain(videoRoiX, 0, video.width - 1);
+  videoRoiY = constrain(videoRoiY, 0, video.height - 1);
+
+  videoRoiW = constrain(
+    videoRoiW,
+    1,
+    video.width - videoRoiX
+  );
+
+  videoRoiH = constrain(
+    videoRoiH,
+    1,
+    video.height - videoRoiY
+  );
+
+  // ----------------------------------------------------------
+  // 肌色判定用のマスク画像を作成
+  // ----------------------------------------------------------
+  PImage mask = createImage(video.width, video.height, RGB);
+  mask.loadPixels();
+
+  int whitePixelCount = 0;
+  int roiPixelCount = 0;
+
+  for (int y = 0; y < video.height; y++) {
+    for (int x = 0; x < video.width; x++) {
       int index = x + y * video.width;
+
+      boolean insideRoi =
+        x >= videoRoiX &&
+        x < videoRoiX + videoRoiW &&
+        y >= videoRoiY &&
+        y < videoRoiY + videoRoiH;
+
+      // ROIの外側は黒にする
+      if (!insideRoi) {
+        mask.pixels[index] = color(0);
+        continue;
+      }
+
+      roiPixelCount++;
+
       color c = video.pixels[index];
 
       float r = red(c);
       float g = green(c);
       float b = blue(c);
 
-      // 赤シール判定
-      // 攻撃力アップ / チョキ用
-      // 肌色を赤と間違えにくくするため、かなり赤が強い時だけ数える
-      if (r > 180 && r > g * 1.7 && r > b * 1.7) {
-        redCount++;
-      }
+      float maxValue = max(r, max(g, b));
+      float minValue = min(r, min(g, b));
 
-      // 緑シール判定
-      // 回復 / パー用
-      if (g > 140 && g > r * 1.3 && g > b * 1.3) {
-        greenCount++;
+      // 簡易的な肌色判定
+      boolean isSkin =
+        r > 70 &&
+        g > 35 &&
+        b > 20 &&
+        r > g &&
+        r > b &&
+        maxValue - minValue > 15 &&
+        abs(r - g) > 8;
+
+      if (isSkin) {
+        mask.pixels[index] = color(255);
+        whitePixelCount++;
+      } else {
+        mask.pixels[index] = color(0);
       }
     }
   }
 
-  debugRedCount = redCount;
-  debugGreenCount = greenCount;
+  mask.updatePixels();
 
-  println("red = " + redCount + " / green = " + greenCount);
+  // デバッグ表示用に保存
+  debugSkinMask = mask;
 
+  // ----------------------------------------------------------
+  // ROI内に占める白ピクセルの割合を計算
+  // ----------------------------------------------------------
+  float whiteRatio = 0;
+
+  if (roiPixelCount > 0) {
+    whiteRatio =
+      whitePixelCount / (float)roiPixelCount;
+  }
+
+  debugWhitePixels = whitePixelCount;
+  debugRoiPixels = roiPixelCount;
+  debugWhiteRatio = whiteRatio;
+
+  // ----------------------------------------------------------
+  // 白ピクセルの割合で判定
+  // ----------------------------------------------------------
   int currentId = -1;
 
-  // 赤が明らかに多いときだけチョキ
-  if (redCount > 25 && redCount > greenCount * 2) {
-    currentId = 2; // チョキ → 攻撃力アップ
-  }
-  // 緑が明らかに多いときだけパー
-  else if (greenCount > 25 && greenCount > redCount * 2) {
-    currentId = 0; // パー → 回復
-  }
-  // 赤も緑も少ないならグー
-  else if (redCount < 8 && greenCount < 8) {
-    currentId = 1; // グー → Bomb
-  }
-  else {
+  // 5%未満なら手がない
+  if (whiteRatio < 0.05) {
     currentId = -1;
+
+  // 5%以上、30%未満ならグー
+  } else if (whiteRatio < 0.30) {
+    currentId = 1;
+
+  // 30%以上、45%未満ならチョキ
+  } else if (whiteRatio < 0.45) {
+    currentId = 2;
+
+  // 45%以上ならパー
+  } else {
+    currentId = 0;
   }
 
-  // 安定化処理
-  // 同じ判定が5フレーム続いたら採用
+  println(
+    "whitePixels=" + whitePixelCount +
+    " roiPixels=" + roiPixelCount +
+    " whiteRatio=" + nf(whiteRatio, 1, 3) +
+    " whitePercent=" + nf(whiteRatio * 100, 1, 1) + "%" +
+    " result=" + getHandSignName(currentId)
+  );
+
+  return currentId;
+}
+
+//安定関数を追加
+int stabilizeHandId(int currentId) {
   if (currentId == lastHandId) {
     stableCount++;
   } else {
-    stableCount = 0;
     lastHandId = currentId;
+    stableCount = 1;
   }
 
-  if (stableCount > 5) {
+  // 同じ結果が8フレーム続いたら採用
+  if (stableCount >= 8) {
     stableHandId = currentId;
   }
 
   return stableHandId;
+}
+
+//認識値をクリアする関数を追加
+void clearHandDetection() {
+  debugHandArea = 0;
+  debugFillRatio = 0;
+  debugAspectRatio = 0;
+  debugPointCount = 0;
+}
+
+//手の形の名前を取得する
+String getHandSignName(int id) {
+  if (id == 0) {
+    return "パー";
+  } else if (id == 1) {
+    return "グー";
+  } else if (id == 2) {
+    return "チョキ";
+  }
+
+  return "未認識";
 }
 
 
@@ -178,7 +364,7 @@ void drawSelectedItemModel(int id) {
 
   lights();
 
-  translate(width / 2, height / 2 - 120, 0);
+  translate(width / 2, height / 2 - 50, 0);
 
   float jump = abs(sin(frameCount * 0.05)) * 8;
   translate(0, -jump, 0);
@@ -204,23 +390,75 @@ void drawSelectedItemModel(int id) {
 // メインの keyPressed() から呼ばれる
 // ============================================================
 void itemKeyPressed() {
-  if (key == ENTER || key == RETURN || keyCode == ENTER) {
 
-    if (itemUsed) {
-      return;
-    }
+  // 道具の最初の確認画面
+  if (itemToolState == 0) {
 
-    if (selectedItemId == -1) {
+    // ENTERでカメラ判定画面へ
+    if (key == ENTER || key == RETURN || keyCode == ENTER) {
+      itemToolState = 1;
+
+      selectedItemId = -1;
+      previewItemId = -1;
+      itemUsed = false;
+      itemEffectFrame = 0;
+
+      lastHandId = -1;
+      stableCount = 0;
+      stableHandId = -1;
+      
+      clearHandDetection();
+
       message = "手を画面中央に見せてください";
       return;
     }
 
-    useItemByHandSign(selectedItemId);
+    // Rで戦闘画面へ戻る
+    if (key == 'r' || key == 'R') {
+      resetItemTool();
+      scene = 0;
+      return;
+    }
   }
 
-  // Rキーで道具選択だけリセット
-  if (key == 'r' || key == 'R') {
-    resetItemTool();
+    // カメラ判定画面
+    else if (itemToolState == 1) {
+
+    // ENTERで現在表示中の道具を確定して使用
+    if (key == ENTER || key == RETURN || keyCode == ENTER) {
+   
+      // 手を認識していない場合は確定しない
+      if (previewItemId == -1) {
+        message = "手の形を認識できていません";
+        return;
+      }
+
+      // すでに使用済みなら再使用しない
+      if (itemUsed) {
+        return;
+      }
+
+      // 現在表示している道具を確定
+      selectedItemId = previewItemId;
+
+      // 確定した道具を使用
+      useItemByHandSign(selectedItemId);
+
+      // 効果を画面に表示
+      message =
+        getItemName(selectedItemId) +
+        "を使用：" +
+        getItemEffectText(selectedItemId);
+
+      return;
+    }
+
+    // Rで戦闘画面へ戻る
+    if (key == 'r' || key == 'R') {
+      resetItemTool();
+      scene = 0;
+      return;
+    }
   }
 }
 
@@ -229,16 +467,21 @@ void itemKeyPressed() {
 // 道具使用
 // ============================================================
 void useItemByHandSign(int id) {
+
   if (id == 0) {
-    useHealItem();      // メインファイルの関数
-  } else if (id == 1) {
-    useBombItem();      // メインファイルに追加する関数
-  } else if (id == 2) {
-    usePowerItem();     // メインファイルの関数
+    useHealItem();
+  }
+  else if (id == 1) {
+    useBombItem();
+  }
+  else if (id == 2) {
+    usePowerItem();
   }
 
   itemUsed = true;
-  itemEffectFrame = frameCount;
+
+  effectStartFrame = frameCount;
+  waitingNextScene = true;
 }
 
 
@@ -246,41 +489,90 @@ void useItemByHandSign(int id) {
 // UI
 // ============================================================
 void drawItemUI() {
-  fill(0, 180);
+  int panelY = 300;
+
+  fill(0, 190);
   noStroke();
-  rect(0, height / 2, width, height / 2);
+  rect(0, panelY, width, height - panelY);
 
   fill(255);
   textAlign(LEFT, CENTER);
 
-  textSize(24);
-  text("道具を選択", 30, height / 2 + 35);
-
-  textSize(18);
-  text("緑が多い : パー / 回復", 30, height / 2 + 75);
-  text("赤が見える : チョキ / 攻撃力アップ", 30, height / 2 + 105);
-  text("赤も緑も少ない : グー / Bomb", 30, height / 2 + 135);
-
-  textSize(20);
-  text("Selected : " + getItemName(selectedItemId), 30, height / 2 + 180);
-  text("Effect   : " + getItemEffectText(selectedItemId), 30, height / 2 + 215);
+  textSize(22);
+  text("道具を選択", 20, panelY + 25);
 
   textSize(16);
-  text("red = " + debugRedCount + " / green = " + debugGreenCount, 30, height / 2 + 245);
+  text(
+    "パー：Herb   チョキ：Power Seed   グー：Bomb",
+    20,
+    panelY + 55
+  );
 
-  textSize(20);
-  text(message, 30, height / 2 + 280);
+  textSize(18);
+  text(
+    "現在の判定：" + getHandSignName(previewItemId),
+    20,
+    panelY + 85
+  );
+
+  text(
+    "表示中：" + getItemName(previewItemId),
+    20,
+    panelY + 112
+  );
+
+  textSize(14);
+  text(
+    "白ピクセル=" + debugWhitePixels +
+    "  白色割合=" + nf(debugWhiteRatio * 100, 1, 1) + "%",
+    20,
+    panelY + 138
+  );
+
+  textSize(16);
+  text(message, 20, panelY + 165);
 
   textAlign(RIGHT, CENTER);
-  textSize(18);
 
   if (!itemUsed) {
-    text("ENTER : 使用", width - 30, height / 2 + 80);
+    text("ENTER：使用", width - 20, panelY + 85);
   } else {
-    text("戦闘画面に戻ります", width - 30, height / 2 + 80);
+    text("道具を使用しました", width - 20, panelY + 85);
   }
 
-  text("ESC : 戻る", width - 30, height / 2 + 115);
+  text("R / ESC：戻る", width - 20, panelY + 115);
+  
+  if (debugSkinMask != null) {
+    image(debugSkinMask, width - 210, 10, 200, 150);
+
+    fill(0, 180);
+    noStroke();
+    rect(width - 210, 160, 200, 25);
+
+   fill(255);
+    textAlign(CENTER, CENTER);
+    textSize(13);
+    text("肌色判定マスク", width - 110, 172);
+  }
+
+  if (itemUsed) {
+ 
+    fill(0, 180);
+    rect(100, 100, width - 200, 100);
+
+    fill(255, 255, 0);
+
+    textAlign(CENTER, CENTER);
+    textSize(28);
+
+    text(
+      getItemName(selectedItemId)
+      + " 発動！\n"
+      + getItemEffectText(selectedItemId),
+      width / 2,
+      150
+    );
+  }
 
   textAlign(CENTER, CENTER);
 }
@@ -322,8 +614,14 @@ String getItemEffectText(int id) {
 // リセット
 // ============================================================
 void resetItemTool() {
+
   selectedItemId = -1;
+  previewItemId = -1;
+
   itemUsed = false;
+
+  waitingNextScene = false;
+  effectStartFrame = 0;
 
   itemEffectFrame = 0;
 
@@ -331,6 +629,7 @@ void resetItemTool() {
   stableCount = 0;
   stableHandId = -1;
 
-  debugRedCount = 0;
-  debugGreenCount = 0;
+  clearHandDetection();
+
+  itemToolState = 0;
 }
