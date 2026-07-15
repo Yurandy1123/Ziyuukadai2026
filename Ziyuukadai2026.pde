@@ -84,7 +84,7 @@ void updateAndDrawPopups() {
   for (int i = popups.size() - 1; i >= 0; i--) {
     DamagePopup p = popups.get(i);
     p.life++;
-    float t = p.life / 50.0;
+    float t = p.life / 100.0;
     if (t > 1) { popups.remove(i); continue; }
 
     float yOff = -t * 55;
@@ -386,7 +386,7 @@ void checkMagicResult() {
     spawnDamagePopup(width/2, 130, "-" + magicDamage, color(255, 80, 80));
 
     waitingPostDamage = true;
-    postDamageTimer   = 45;
+    postDamageTimer   = 180;
   }
 }
 
