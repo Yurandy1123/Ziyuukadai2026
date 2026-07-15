@@ -37,6 +37,7 @@ boolean itemUsed = false;
 int itemEffectFrame = 0;
 int effectWait = 60;
 
+boolean waitingEffect = false;
 boolean waitingNextScene = false;
 int effectStartFrame = 0;
 
@@ -44,12 +45,6 @@ int effectStartFrame = 0;
 int lastHandId = -1;
 int stableCount = 0;
 int stableHandId = -1;
-
-// デバッグ表示用
-float debugHandArea = 0;
-float debugFillRatio = 0;
-float debugAspectRatio = 0;
-int debugPointCount = 0;
 
 // 認識範囲
 int handRoiX = 160;
@@ -124,24 +119,28 @@ void itemARScene() {
     previewItemId = detectHandSignByContour();
   }
 
-  if (previewItemId != -1) {
-    // 現在の判定結果に対応する3Dモデルを表示
+  if (itemUsed) {
+    drawSelectedItemModel(selectedItemId);
+  }
+  else if (previewItemId != -1) {
     drawSelectedItemModel(previewItemId);
   }
   
   // 効果表示後に自動で次画面へ
-  if (waitingNextScene) {
-    int elapsed = frameCount - effectStartFrame;
-    
-    // 約2秒
-    if (elapsed > 120) {
+  if (waitingEffect) {
 
-      waitingNextScene = false;
+    int elapsed = frameCount - effectStartFrame;
+
+    if (elapsed >= 120) { // 約2秒
+ 
+      waitingEffect = false;
+
+      // ここで初めて効果を適用
+      useItemByHandSign(selectedItemId);
 
       resetItemTool();
 
-      // 次のシーンへ
-      scene = 3;
+      scene = 0;
 
       return;
     }
@@ -173,14 +172,12 @@ void drawItemStartScene() {
 // ============================================================
 int detectHandSignByContour() {
   if (video == null) {
-    clearHandDetection();
     return stabilizeHandId(-1);
   }
 
   video.loadPixels();
 
   if (video.pixels == null || video.pixels.length == 0) {
-    clearHandDetection();
     return stabilizeHandId(-1);
   }
 
@@ -332,14 +329,6 @@ int stabilizeHandId(int currentId) {
   return stableHandId;
 }
 
-//認識値をクリアする関数を追加
-void clearHandDetection() {
-  debugHandArea = 0;
-  debugFillRatio = 0;
-  debugAspectRatio = 0;
-  debugPointCount = 0;
-}
-
 //手の形の名前を取得する
 String getHandSignName(int id) {
   if (id == 0) {
@@ -406,8 +395,6 @@ void itemKeyPressed() {
       lastHandId = -1;
       stableCount = 0;
       stableHandId = -1;
-      
-      clearHandDetection();
 
       message = "手を画面中央に見せてください";
       return;
@@ -440,9 +427,11 @@ void itemKeyPressed() {
 
       // 現在表示している道具を確定
       selectedItemId = previewItemId;
+      
+      itemUsed = true;
 
-      // 確定した道具を使用
-      useItemByHandSign(selectedItemId);
+      waitingEffect = true;
+      effectStartFrame = frameCount;
 
       // 効果を画面に表示
       message =
@@ -555,22 +544,19 @@ void drawItemUI() {
     text("肌色判定マスク", width - 110, 172);
   }
 
-  if (itemUsed) {
- 
-    fill(0, 180);
-    rect(100, 100, width - 200, 100);
+  if (waitingEffect) {
+
+    fill(0, 200);
+    rect(70, 120, 500, 90);
 
     fill(255, 255, 0);
-
     textAlign(CENTER, CENTER);
-    textSize(28);
+    textSize(30);
 
     text(
-      getItemName(selectedItemId)
-      + " 発動！\n"
-      + getItemEffectText(selectedItemId),
+      getItemName(selectedItemId) + " 発動！",
       width / 2,
-      150
+      165
     );
   }
 
@@ -628,8 +614,6 @@ void resetItemTool() {
   lastHandId = -1;
   stableCount = 0;
   stableHandId = -1;
-
-  clearHandDetection();
 
   itemToolState = 0;
 }
